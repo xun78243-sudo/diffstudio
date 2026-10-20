@@ -9,6 +9,7 @@
     "test": "node test/fixtures.js && node test/diff.test.js && node test/core-extra.test.js && node test/p0-features.test.js && node test/unimportant.test.js && node test/replacement.test.js && node test/columnRules.test.js && node test/syntax.test.js",
     "test:e2e": "node test/fixtures.js && node test/e2e.js",
     "test:p0": "node test/p0-e2e.js && node test/p0-ui.js && node test/p0-merge-apply.js",
+    "test:folder-ui": "node test/folderFilters-ui.js",
     "test:menu": "node test/menu-icons.js",
     "demo:pictures": "electron test/make-demo-pictures.js",
     "icon": "node build/make-icon.js",

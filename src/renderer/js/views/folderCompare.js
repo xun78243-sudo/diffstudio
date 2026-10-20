@@ -16,6 +16,8 @@ import { viewerFor } from '../core/viewer.js';
 import { planFolderPatch, describePlan, describeOp, patchReportModel } from '../core/folderPatch.js';
 import { buildReport } from '../core/patch.js';
 import { setStatus } from '../core/status.js';
+import { searchFiles } from '../core/search.js';
+import { compileRules, isUnimportantPath } from '../core/unimportant.js';
 import {
   planRename, planMove, planNewFolder, parseTouchTime, existingNames,
   baseName as pathBaseName, dirName as pathDirName,
@@ -60,6 +62,8 @@ export function createFolderCompareSession(container, context, initial = {}) {
     filter: 'all',
     mask: '',
     exclude: '',
+    /** 「不重要文件」规则原文（正则，换行或分号分隔） */
+    unimportantPaths: '',
     /** 递归比较期间用于丢弃过期结果的令牌 */
     runToken: 0,
     /** 最近一次单文件复制，用于「撤销上一步」 */
@@ -118,7 +122,70 @@ export function createFolderCompareSession(container, context, initial = {}) {
 
   const filterBar = el('div', { class: 'filter-bar' }, maskInput, excludeInput, filterSelect, shownCount, btnUndo);
 
+  // 「不重要文件」规则：按相对路径的正则剔除条目，仅影响显示，不改变比较结果。
+  const unimportantInput = el('input', {
+    class: 'exclude', type: 'text',
+    placeholder: t('folderCompare.unimportantPlaceholder'),
+    'data-role': 'unimportant-files',
+  });
+  const unimportantNote = el('span', { class: 'unimportant-note', 'data-role': 'unimportant-files-invalid' });
+  const unimportantBar = el('div', { class: 'filter-bar' }, unimportantInput, unimportantNote);
+  // 规则是正则；写错时只提示、不过滤，避免「填错就整棵树消失」。
+  let unimportantTimer = null;
+  function applyUnimportant() {
+    state.unimportantPaths = unimportantInput.value.trim();
+    const compiled = compileRules(state.unimportantPaths);
+    const bad = compiled.ok === false;
+    unimportantBar.classList.toggle('invalid', bad);
+    unimportantInput.title = bad ? t('folderCompare.unimportantInvalid') : t('folderCompare.unimportantHint');
+    unimportantNote.textContent = bad ? t('folderCompare.unimportantInvalid') : '';
+    // 刻意不走 showTree()：它只在「视图停在搜索结果」时才重绘，
+    // 而规则改动必须无条件重绘一次，否则过滤结果不更新。
+    treeShowingSearch = false;
+    renderTree();
+  }
+  // 输入时防抖：每敲一个字符都整树重建会明显卡顿。
+  unimportantInput.addEventListener('input', () => {
+    clearTimeout(unimportantTimer);
+    unimportantTimer = setTimeout(applyUnimportant, 200);
+  });
+  // 失焦 / 回车立刻生效，不必等防抖。
+  unimportantInput.addEventListener('change', () => {
+    clearTimeout(unimportantTimer);
+    applyUnimportant();
+  });
+
+  // ---------------------------------------------------------------------
+  // 查找文件内文本：支持普通文本 / 正则 / 全字 / 区分大小写
+  // ---------------------------------------------------------------------
+  const searchInput = el('input', {
+    class: 'find-input', type: 'text',
+    placeholder: t('folderCompare.searchPlaceholder'),
+    title: t('folderCompare.searchHint'),
+    'data-role': 'search-query',
+  });
+  const searchRegexBox = el('input', { type: 'checkbox', 'data-role': 'search-regex' });
+  const searchWordBox = el('input', { type: 'checkbox', 'data-role': 'search-word' });
+  const searchCaseBox = el('input', { type: 'checkbox', 'data-role': 'search-case' });
+  const searchRegex = el('label', { class: 'search-opt' }, searchRegexBox, el('span', { text: t('folderCompare.searchRegex') }));
+  const searchWord = el('label', { class: 'search-opt' }, searchWordBox, el('span', { text: t('folderCompare.searchWholeWord') }));
+  const searchCase = el('label', { class: 'search-opt' }, searchCaseBox, el('span', { text: t('folderCompare.searchCase') }));
+  const btnSearchGo = el('button', { class: 'icon-btn', text: t('folderCompare.searchGo'), 'data-role': 'search-go' });
+  // 默认隐藏：点工具栏的「查找」才展开，避免常驻占一行。
+  const searchBar = el('div', { class: 'search-bar hidden' },
+    searchInput, btnSearchGo, searchRegex, searchWord, searchCase);
+
+
   const treeEl = el('div', { class: 'tree' });
+  // 查找结果复用 treeEl 展示（renderSearchResults 直接清空重填）。
+  // 回到文件树时若还停在搜索结果上，需要重新渲染，否则筛选改动看不到效果。
+  let treeShowingSearch = false;
+  // 搜索结束后回到文件树；treeEl 已被搜索结果占用，此时必须重绘。
+  const showTree = () => {
+    if (!treeShowingSearch) return;
+    treeShowingSearch = false;
+    renderTree();
+  };
   const treeWrap = el('div', { class: 'pane-body' }, treeEl);
   const legend = el('div', { class: 'legend' });
   // 补丁预览：默认隐藏；生成计划后列出每一步，并给出执行/撤销/导出报告。
@@ -137,7 +204,7 @@ export function createFolderCompareSession(container, context, initial = {}) {
       btnPatchLeft, btnPatchRight, btnPatchContent, btnPatchApply, btnPatchUndo, btnPatchClose),
     el('div', { class: 'folder-patch-body' }, patchList));
   patchPanel.hidden = true;
-  const root = el('div', { class: 'session' }, toolbar, opsBar, filterBar, legend, treeWrap, patchPanel);
+  const root = el('div', { class: 'session' }, toolbar, opsBar, filterBar, unimportantBar, searchBar, legend, treeWrap, patchPanel);
   container.append(root);
 
   function renderLegend() {
@@ -303,11 +370,24 @@ export function createFolderCompareSession(container, context, initial = {}) {
     return L ? S.LEFT_ORPHAN : S.RIGHT_ORPHAN;
   }
 
+  /**
+   * 把「不重要文件」规则解析成判定函数。
+   *
+   * 规则写错时返回 null：宁可不过滤，也不能因为用户少打一个括号就让整棵树消失。
+   */
+  function unimportantMatcher() {
+    const unr = compileRules(state.unimportantPaths || '');
+    if (!unr.ok || !(unr.rules || []).length) return null;
+    return (key) => isUnimportantPath(String(key).replace(/\\/g, '/'), unr.rules);
+  }
+
   /** 目录在筛选后是否仍应显示：自身或任一子孙可见。 */
   function visibleDirs() {
     const test = FILTERS[state.filter];
+    const isUnimportant = unimportantMatcher();
     const visible = new Set();
     for (const [key, st] of state.status) {
+      if (isUnimportant && isUnimportant(key)) continue;
       if (!test(st)) continue;
       // 命中的文件自身可见，且它到根的每一级祖先目录都要保留，
       // 否则父目录不在 visible 里，这个文件在按父目录分组的树中就渲染不出来。
@@ -328,7 +408,9 @@ export function createFolderCompareSession(container, context, initial = {}) {
       return;
     }
 
-    const visible = state.filter === 'all' ? new Set(allKeys) : visibleDirs();
+    // 「不重要文件」规则独立于差异筛选：只看 status，不区分左右，
+    // 因此即使当前是「全部」也要经过 visibleDirs 才会被剔除。
+    const visible = state.filter === 'all' && !state.unimportantPaths ? new Set(allKeys) : visibleDirs();
     const children = new Map();
     for (const key of allKeys) {
       if (!visible.has(key)) continue;
@@ -497,7 +579,7 @@ export function createFolderCompareSession(container, context, initial = {}) {
   /** 导出当前（筛选后可见的）差异清单为 HTML 报告。 */
   async function exportReport() {
     if (!state.status.size) { setStatus(t('folderCompare.needBoth')); return; }
-    const visible = state.filter === 'all' ? new Set(state.status.keys()) : visibleDirs();
+    const visible = state.filter === 'all' && !state.unimportantPaths ? new Set(state.status.keys()) : visibleDirs();
     const rows = [];
     for (const key of [...state.status.keys()].sort((a, b) => a.localeCompare(b))) {
       const st = state.status.get(key);
@@ -872,43 +954,47 @@ export function createFolderCompareSession(container, context, initial = {}) {
   // 查找文件内文本
   // ---------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------
+  // 查找文件内文本：支持普通文本 / 正则 / 全字 / 区分大小写
+  // ---------------------------------------------------------------------
+
   async function findInFiles() {
     if (!state.left || !state.right) { setStatus(t('folderCompare.needBoth')); return; }
-    const query = window.prompt(t('folderCompare.searchQuery'), '');
+    const query = searchInput.value;
     if (!query) return;
+    const opts = {
+      regex: searchRegexBox.checked,
+      wholeWord: searchWordBox.checked,
+      caseSensitive: searchCaseBox.checked,
+    };
     setStatus(t('folderCompare.searchRunning'));
     // 只搜文本：二进制文件没有"行"可言，按扩展名粗略过滤，避免把大文件全读进来。
-    const files = [];
+    const payload = [];
     for (const map of [state.leftMap, state.rightMap]) {
       for (const [rel, item] of map) {
         if (item.type === 'dir') continue;
         if (item.size > 8 * 1024 * 1024) continue;
         if (viewerFor(rel) !== 'text') continue;
-        files.push({ rel, path: item.path });
+        let text;
+        try {
+          const r = await api.readText(item.path, 'auto');
+          if (r.binary) continue;
+          text = r.text;
+        } catch (e) { continue; }
+        payload.push({ rel, path: item.path, text });
       }
     }
-    const hits = [];
-    let scanned = 0;
-    for (const f of files) {
-      let text;
-      try {
-        const r = await api.readText(f.path, 'auto');
-        if (r.binary) continue;
-        text = r.text;
-      } catch (e) { continue; }
-      scanned++;
-      const lines = [];
-      text.split(/\r\n|\n|\r/).forEach((line, i) => {
-        if (line.toLowerCase().includes(query.toLowerCase())) {
-          lines.push({ line: i + 1, text: line.length > 240 ? line.slice(0, 240) + '…' : line, file: f.rel });
-        }
-      });
-      if (lines.length) hits.push({ file: f.rel, hits: lines });
+    // searchFiles 统一处理正则 / 全字 / 大小写，并限制单行长度与命中上限。
+    const res = searchFiles(payload, query, opts);
+    if (!res.ok) {
+      setStatus(t('folderCompare.searchInvalid'));
+      return;
     }
-    renderSearchResults(hits, scanned);
+    renderSearchResults(res.files.map((f) => ({ file: f.rel, hits: f.hits })), payload.length);
   }
 
   function renderSearchResults(groups, scanned) {
+    treeShowingSearch = true;
     treeEl.innerHTML = '';
     if (!groups.length) {
       treeEl.append(el('div', { class: 'tree-row empty' }, el('span', { class: 'name', text: t('folderCompare.searchNothing') })));
@@ -931,7 +1017,14 @@ export function createFolderCompareSession(container, context, initial = {}) {
     setStatus(t('folderCompare.searchDone', { n: total, files: groups.length }));
   }
 
-  btnSearch.addEventListener('click', findInFiles);
+  // 工具栏「寻找」按钮只负责展开查找栏；回车或「查找」按钮才真正执行。
+  btnSearch.addEventListener('click', () => {
+    searchBar.classList.toggle('hidden');
+    if (!searchBar.classList.contains('hidden')) searchInput.focus();
+    else showTree();
+  });
+  btnSearchGo.addEventListener('click', findInFiles);
+  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') findInFiles(); });
 
   // ---------------------------------------------------------------------
   // 压缩包：把某一侧的压缩包解析成文件夹树（只读）

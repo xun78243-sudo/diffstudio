@@ -7,6 +7,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Find in files options (查找选项)** — the folder compare toolbar now opens a
+  find bar with regex, whole-word and match-case toggles; invalid patterns report
+  an error instead of silently returning nothing.
+- **Unimportant files filter (不重要文件)** — a regex of relative paths hides
+  matching entries from the folder tree without changing the comparison result.
+  An invalid pattern is flagged and filtering is suspended rather than blanking
+  the tree.
 - **Syntax highlighting (语法高亮)** — text compare colourises comments,
   strings, numbers and keywords for JavaScript/TypeScript, Python, Java, C/C++,
   JSON, XML/HTML, SQL and Shell. The language is detected from the left file

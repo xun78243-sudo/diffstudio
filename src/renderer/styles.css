@@ -702,6 +702,24 @@ table.data-table { border-collapse: collapse; font-family: var(--mono); font-siz
   padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px;
   background: var(--bg-input); color: var(--text); font-size: 12.5px;
 }
+/* 「不重要文件」输入框：正则写错时标红提示，但不改变筛选结果。 */
+.filter-bar input[data-role="unimportant-files"] { width: 260px; }
+.filter-bar.invalid input[data-role="unimportant-files"] { border-color: var(--danger, #d93025); }
+/* 查找栏：默认隐藏，点「查找」展开。 */
+.search-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 3px 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-light);
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+/* `.search-bar.hidden` 必须压在 display:flex 之后，否则无法隐藏。 */
+.search-bar.hidden { display: none; }
+.search-bar .find-input { width: 240px; }
+/* 选项名不要被断行。 */
+.search-opt { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
 .shown-count { margin-left: auto; color: var(--text-dim); white-space: nowrap; }
 
 .tree-row { cursor: default; }

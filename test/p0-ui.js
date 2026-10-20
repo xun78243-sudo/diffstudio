@@ -67,11 +67,14 @@ async function main() {
   check('ui: new folder exists', fs.existsSync(path.join(L, 'created-dir')) || fs.existsSync(path.join(R, 'created-dir')), true);
 
   // ---- 查找文本 ----
-  await ev(`window.__answers.push('needle'); 'ok'`);
+  // 查找栏现在需要先展开，再输入关键字后执行（原先用 window.prompt）。
   await clickLast('find-in-files');
+  await sleep(300);
+  await ev(`(function(){ var e = document.querySelector('.view.active [data-role="search-query"]'); e.value = 'needle'; return 'ok'; })()`);
+  await clickLast('search-go');
   await sleep(2500);
   const st = await status();
-  check('ui: find reports hits', /找到 2 处|2 处匹配/.test(st) || /2/.test(st), true);
+  check('ui: find reports hits', /找到/.test(st) && /2/.test(st), true);
   const hitRows = await ev(`document.querySelectorAll('.tree-row.diff').length`);
   check('ui: find rendered hit rows', hitRows >= 2, true);
 
