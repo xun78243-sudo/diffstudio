@@ -336,6 +336,8 @@ body { display: flex; flex-direction: column; }
 .row.kind-change { background: var(--c-change); }
 .row.kind-unimportant { background: var(--c-unimportant); color: var(--fg-muted, #6b7280); }
 .unimportant-note { color: var(--fg-muted, #6b7280); margin-left: 6px; }
+/* 规则输入框：单行高度与输入框对齐，允许输入多行。 */
+.rules-input { resize: vertical; min-height: 26px; max-height: 120px; width: 200px; font: inherit; }
 /* 只看重要差异：把不重要行整体淡化，行数与索引保持不变。 */
 .important-only .row.kind-unimportant { opacity: 0.35; }
 .row.kind-conflict { background: var(--c-conflict); }

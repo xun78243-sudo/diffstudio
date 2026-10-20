@@ -7,8 +7,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Replacement rules (替换规则)** — text compare accepts `/regex/=>replacement`
-  rules (no slashes = literal match). Rules rewrite the text **before**
+- **Column rules for table compare (表格列规则)** — each column can be compared
+  with its own rules: `ignore` (skip the column), `case` (ignore case), `trim`,
+  `numeric` (`1.0` equals `1`), and `regex:<pattern>` (compare only the matched
+  part, e.g. the date in a timestamp). Rules select columns by header name or
+  `#index`, with `*` for all columns. New module `core/columnRules.js`.
+- **Replacement rules (替换规则)** — text compare accepts `/regex/=>replacement`  rules (no slashes = literal match). Rules rewrite the text **before**
   comparing, so differences in timestamps, version numbers and build IDs are
   ignored. Files are never modified and the panes still show the original text.
   Invalid rules are reported inline. New module `core/replacement.js`.
@@ -38,11 +42,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Verification
 
-- Unit: 287/287 (`npm test`, includes `test/p0-features.test.js` 77 checks,
-  `test/unimportant.test.js` 21 checks and `test/replacement.test.js` 31 checks).
+- Unit: 318/318 (`npm test`, includes `test/p0-features.test.js` 77 checks,
+  `test/unimportant.test.js` 21 checks, `test/replacement.test.js` 31 checks and
+  `test/columnRules.test.js` 31 checks).
 - E2E: 125/125 unchanged, plus 28 targeted checks (`npm run test:p0`),
-  7 UI checks for unimportant rules (`node test/unimportant-ui.js`) and
-  9 UI checks for replacement rules (`node test/replacement-ui.js`).
+  7 UI checks for unimportant rules (`node test/unimportant-ui.js`),
+  9 UI checks for replacement rules (`node test/replacement-ui.js`) and
+  6 UI checks for column rules (`node test/columnRules-ui.js`).
 
 ## 0.1.0 — 2026-10-20
 

@@ -9,12 +9,13 @@
 import { el } from '../core/ui.js';
 import { myersDiff, EDIT } from '../core/diff.js';
 import { parseCsv } from '../core/csv.js';
+import { compileColumnRules, columnOptions, cellsEqual } from '../core/columnRules.js';
 import { setStatus } from '../core/status.js';
 
 export function createTableCompareSession(container, context, initial = {}) {
   const api = context.api;
   const t = context.t;
-  const state = { leftPath: '', rightPath: '', ignoreWhitespace: false };
+  const state = { leftPath: '', rightPath: '', ignoreWhitespace: false, columnRules: '', columnOpts: null };
 
   const leftInput = el('input', { class: 'path-input', placeholder: t('table.leftPlaceholder') });
   const rightInput = el('input', { class: 'path-input', placeholder: t('table.rightPlaceholder') });
@@ -22,11 +23,21 @@ export function createTableCompareSession(container, context, initial = {}) {
   const btnRight = el('button', { class: 'icon-btn', text: t('common.pickFile'), title: t('table.openRight'), 'data-role': 'open-right' });
   const btnCompare = el('button', { class: 'icon-btn', text: '↻ ' + t('table.tabTitle'), title: t('table.compare'), 'data-role': 'compare' });
   const btnTrim = el('button', { class: 'icon-btn', text: t('table.ignoreWhitespace'), title: t('table.ignoreWhitespaceHint'), 'data-role': 'ignore-whitespace' });
+// 列规则输入框：每行 `<列>:<选项>`，列可用表头名或 #序号。
+// 用 textarea 而非 input：`<input>` 会吞掉换行，多行规则根本输不进去。
+const columnRulesInput = el('textarea', {
+  class: 'rules-input',
+  rows: '1',
+  placeholder: t('table.columnRulesPlaceholder'),
+  title: t('table.columnRulesHint'),
+  'data-role': 'column-rules',
+});
+const columnRulesNote = el('span', { class: 'unimportant-note', 'data-role': 'column-rules-note' });
 
   const toolbar = el('div', { class: 'session-toolbar' },
     el('span', { text: t('common.sideLeft') }), leftInput, btnLeft,
     el('span', { text: t('common.sideRight') }), rightInput, btnRight,
-    el('span', { class: 'spacer' }), btnTrim, btnCompare,
+    el('span', { class: 'spacer' }), btnTrim, columnRulesInput, columnRulesNote, btnCompare,
   );
 
   const legend = el('div', { class: 'legend' },
@@ -86,6 +97,15 @@ export function createTableCompareSession(container, context, initial = {}) {
     if (state.leftPath && state.rightPath) compare();
   });
 
+  // 列规则在回车 / 失焦时重新比较，避免逐字符重算整张表。
+  const applyColumnRules = () => {
+    state.columnRules = columnRulesInput.value;
+    columnRulesInput.classList.toggle('invalid', !compileColumnRules(state.columnRules).ok);
+    if (state.leftPath && state.rightPath) compare();
+  };
+  columnRulesInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyColumnRules(); });
+  columnRulesInput.addEventListener('change', applyColumnRules);
+
   async function compare() {
     // 输入框是唯一事实来源（用户可以粘贴路径后回车）。
     state.leftPath = leftInput.value.trim();
@@ -112,6 +132,16 @@ export function createTableCompareSession(container, context, initial = {}) {
     const columns = alignColumns(leftHeader, rightHeader);
     const leftBody = left.slice(1);
     const rightBody = right.slice(1);
+
+    // 列规则：按 1 基列序号预先算好每列选项，单元格比较时直接查表。
+    const colCompiled = compileColumnRules(state.columnRules || '');
+    state.columnRulesInvalid = !colCompiled.ok;
+    state.columnOpts = new Map();
+    if (colCompiled.ok && colCompiled.rules.length) {
+      columns.forEach((col, idx) => {
+        state.columnOpts.set(idx + 1, columnOptions(col, colCompiled.rules, idx + 1));
+      });
+    }
 
     // 行对齐：先按「整行内容」做 Myers，插入/删除不会污染后续行。
     // 两侧完全相同的行视为锚点；剩余行再按顺序配对为修改。
@@ -183,20 +213,23 @@ export function createTableCompareSession(container, context, initial = {}) {
       let rowDiffers = !!forceDiff;
 
       // 单元格差异：按列映射逐列比较（重复的列映射不会重复计数）
-      for (const col of columns) {
+      for (let ci = 0; ci < columns.length; ci++) {
+        const col = columns[ci];
         if (col.leftIndex < 0 || col.rightIndex < 0) continue;
         if (!lr || !rr) continue;
         const lv = lr[col.leftIndex] ?? '';
         const rv = rr[col.rightIndex] ?? '';
-        if (!cellEquals(lv, rv)) { diffCells++; rowDiffers = true; }
+        if (!cellEqualsAt(lv, rv, ci + 1)) { diffCells++; rowDiffers = true; }
       }
 
-      for (const col of columns) {
+      for (let ci = 0; ci < columns.length; ci++) {
+        const col = columns[ci];
+        const ordinal = ci + 1;
         // 左侧单元格
         const lv = lr && col.leftIndex >= 0 ? lr[col.leftIndex] ?? '' : '';
         const tdL = el('td', { text: lv });
         if (col.leftIndex < 0) tdL.classList.add('missing-col');
-        else if (lr && rr && col.rightIndex >= 0 && !cellEquals(lv, rr[col.rightIndex] ?? '')) {
+        else if (lr && rr && col.rightIndex >= 0 && !cellEqualsAt(lv, rr[col.rightIndex] ?? '', ordinal)) {
           tdL.classList.add('diff');
         }
         trL.append(tdL);
@@ -205,7 +238,7 @@ export function createTableCompareSession(container, context, initial = {}) {
         const rv = rr && col.rightIndex >= 0 ? rr[col.rightIndex] ?? '' : '';
         const tdR = el('td', { text: rv });
         if (col.rightIndex < 0) tdR.classList.add('missing-col');
-        else if (lr && rr && col.leftIndex >= 0 && !cellEquals(lr[col.leftIndex] ?? '', rv)) {
+        else if (lr && rr && col.leftIndex >= 0 && !cellEqualsAt(lr[col.leftIndex] ?? '', rv, ordinal)) {
           tdR.classList.add('diff');
         }
         trR.append(tdR);
@@ -238,6 +271,14 @@ export function createTableCompareSession(container, context, initial = {}) {
       leftOnly: leftOnlyRows,
       rightOnly: rightOnlyRows,
     }));
+
+    // 列规则提示：无效时明确告知，否则显示生效的列数，避免"为什么这列不算差异"无从查证。
+    const activeCols = colCompiled.ok ? colCompiled.rules.length : 0;
+    columnRulesNote.textContent = state.columnRulesInvalid
+      ? t('table.columnRulesInvalid')
+      : activeCols
+        ? t('table.columnRulesCount', { n: activeCols })
+        : '';
   }
 
   /** 单元格相等判断：可选忽略首尾空白 / 忽略大小写。 */
@@ -245,6 +286,20 @@ export function createTableCompareSession(container, context, initial = {}) {
     if (a === b) return true;
     if (!state.ignoreWhitespace) return false;
     return String(a).trim() === String(b).trim();
+  }
+
+  /**
+   * 带列规则的单元格比较。列序号按「列映射中的位置」1 基计数，
+   * 与用户看到的列顺序一致；选项在这里做惰性缓存，避免逐格重算。
+   */
+  function cellEqualsAt(a, b, ordinal) {
+    const opts = state.columnOpts?.get(ordinal);
+    if (!opts) return cellEquals(a, b);
+    return cellsEqual(a, b, {
+      ...opts,
+      // 全局「忽略首尾空白」与列规则里的 trim 是或的关系。
+      trim: opts.trim || state.ignoreWhitespace,
+    });
   }
 
   /**
@@ -283,6 +338,8 @@ export function createTableCompareSession(container, context, initial = {}) {
         label: (lh[i] ?? '') + (j < 0 ? t('table.colLeft') : ''),
         leftIndex: i,
         rightIndex: j,
+        // 保留未经装饰的表头，列规则按名称匹配必须用它。
+        rawName: (lh[i] ?? '').trim(),
         leftName: (lh[i] ?? '') + (j < 0 ? t('table.colLeft') : ''),
         rightName: j < 0 ? '' : (rh[j] ?? ''),
       });
@@ -293,6 +350,7 @@ export function createTableCompareSession(container, context, initial = {}) {
         label: (rh[j] ?? '') + t('table.colRight'),
         leftIndex: -1,
         rightIndex: j,
+        rawName: (rh[j] ?? '').trim(),
         leftName: '',
         rightName: (rh[j] ?? '') + t('table.colRight'),
       });
