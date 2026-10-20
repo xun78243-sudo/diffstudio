@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>DiffStudio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 菜单栏：会话 / 视图 / 语言 / 帮助 -->
+  <nav id="menubar"></nav>
+
+  <header id="titlebar">
+    <div class="titlebar-left">
+      <span class="app-name" data-i18n="app.name">DiffStudio</span>
+      <nav id="tabbar"></nav>
+    </div>
+    <div class="titlebar-actions">
+      <button id="btn-new-compare" class="tbtn" data-i18n="app.newTextCompare">新建文本比较</button>
+    </div>
+  </header>
+
+  <main id="workspace">
+    <section id="home-view" class="view active">
+      <div class="home-inner">
+        <h1 data-i18n="app.title">DiffStudio 文件比较</h1>
+        <p class="subtitle" data-i18n="home.subtitle">比较、合并与同步文件和文件夹</p>
+        <div class="home-grid">
+          <button class="home-card" data-launch="text">
+            <span class="ic ic-text">Aa</span>
+            <span class="t" data-i18n="home.text">文本比较</span>
+            <span class="d" data-i18n="home.textDesc">逐行比较代码和文本文件</span>
+          </button>
+          <button class="home-card" data-launch="folder">
+            <span class="ic ic-folder"></span>
+            <span class="t" data-i18n="home.folder">文件夹比较</span>
+            <span class="d" data-i18n="home.folderDesc">递归比较目录结构与内容</span>
+          </button>
+          <button class="home-card" data-launch="sync">
+            <span class="ic ic-sync">⇄</span>
+            <span class="t" data-i18n="home.sync">文件夹同步</span>
+            <span class="d" data-i18n="home.syncDesc">分析差异并批量同步</span>
+          </button>
+          <button class="home-card" data-launch="merge">
+            <span class="ic ic-merge"></span>
+            <span class="t" data-i18n="home.merge">三路合并</span>
+            <span class="d" data-i18n="home.mergeDesc">基于共同祖先合并版本</span>
+          </button>
+          <button class="home-card" data-launch="hex">
+            <span class="ic ic-hex">0F</span>
+            <span class="t" data-i18n="home.hex">十六进制比较</span>
+            <span class="d" data-i18n="home.hexDesc">按字节比较二进制文件</span>
+          </button>
+          <button class="home-card" data-launch="table">
+            <span class="ic ic-table"></span>
+            <span class="t" data-i18n="home.table">表格比较</span>
+            <span class="d" data-i18n="home.tableDesc">比较 CSV 表格数据</span>
+          </button>
+          <button class="home-card" data-launch="image">
+            <span class="ic ic-image"></span>
+            <span class="t" data-i18n="home.image">图片比较</span>
+            <span class="d" data-i18n="home.imageDesc">逐像素比较图片差异</span>
+          </button>
+          <button class="home-card" data-launch="patch">
+            <span class="ic ic-patch"></span>
+            <span class="t" data-i18n="home.patch">文本补丁</span>
+            <span class="d" data-i18n="home.patchDesc">生成或应用 Unified Diff 补丁</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="statusbar">
+    <span id="status-text">就绪</span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

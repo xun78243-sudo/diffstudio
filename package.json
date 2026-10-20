@@ -1,0 +1,65 @@
+{
+  "name": "diffstudio",
+  "version": "0.1.0",
+  "description": "A Beyond Compare-inspired desktop application for comparing, merging, and synchronizing files and folders.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:debug": "electron . --remote-debugging-port=9222",
+    "test": "node test/fixtures.js && node test/diff.test.js && node test/core-extra.test.js",
+    "test:e2e": "node test/fixtures.js && node test/e2e.js",
+    "test:menu": "node test/menu-icons.js",
+    "demo:pictures": "electron test/make-demo-pictures.js",
+    "icon": "node build/make-icon.js",
+    "dist": "node build/make-icon.js && electron-builder --win nsis",
+    "pack": "node build/make-icon.js && electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.diffstudio.app",
+    "productName": "DiffStudio",
+    "copyright": "Copyright © 2026 DiffStudio",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "build/icon.*",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "DiffStudio-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DiffStudio",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "author": "",
+  "private": true,
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "ws": "^8.22.0"
+  }
+}
