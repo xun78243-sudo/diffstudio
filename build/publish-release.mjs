@@ -45,7 +45,11 @@ async function api(token, url, options = {}) {
     },
   });
   const text = await res.text();
-  if (!res.ok) fail(`GitHub API ${res.status} ${res.statusText}: ${text}`);
+  if (!res.ok) {
+    const error = new Error(`GitHub API ${res.status} ${res.statusText}: ${text}`);
+    error.status = res.status;
+    throw error;
+  }
   return text ? JSON.parse(text) : null;
 }
 
@@ -68,10 +72,16 @@ const body = await readFile(BODY, 'utf8');
 if (!body.includes(digest)) fail('release-body.md does not contain this installer SHA256; fix it before publishing.');
 
 const base = `https://api.github.com/repos/${OWNER}/${REPO}`;
-const existing = await api(token, `${base}/releases/tags/${encodeURIComponent(TAG)}`).catch(() => null);
+let release;
+try {
+  release = await api(token, `${base}/releases/tags/${encodeURIComponent(TAG)}`);
+} catch (error) {
+  // 404 means "no release for this tag yet"; anything else (401/403/network) must not
+  // be mistaken for it, otherwise the next call fails with a confusing error.
+  if (error.status !== 404) fail(error.message);
+}
 
-let release = existing;
-if (!existing) {
+if (!release) {
   console.log(`Creating release ${TAG} ...`);
   release = await api(token, `${base}/releases`, {
     method: 'POST',
