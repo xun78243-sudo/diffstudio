@@ -1,18 +1,19 @@
-# Manually publish DiffStudio 0.1.0 to a GitHub Release.
+# Manually publish DiffStudio to a GitHub Release.
 #
-# Prerequisite: commits and tag are already pushed (main -> 3b84d8e, tag -> v0.1.0).
+# Prerequisite: commits and tag are already pushed (tag -> v0.1.1).
 #
 # Run from the repo root (C:\Users\14710\Documents\Default Project):
 #   $env:GITHUB_TOKEN = "<PAT with repo scope>"
 #   .\build\publish-release.ps1
 #
 # Without GITHUB_TOKEN the script prompts for it (input is hidden).
+# The token is never written to disk or to git config.
 
 param(
   [string]$Owner = "xun78243-sudo",
   [string]$Repo  = "diffstudio",
-  [string]$Tag   = "v0.1.0",
-  [string]$Installer = "dist\DiffStudio-Setup-0.1.0.exe"
+  [string]$Tag   = "v0.1.1",
+  [string]$Installer = "dist\DiffStudio-Setup-0.1.1.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,7 +39,8 @@ $headers = @{
 $bodyPath = Join-Path $PSScriptRoot "release-body.md"
 # Read as UTF-8 regardless of the console code page; trailing BOM is stripped by Windows PowerShell 5.
 $releaseBody = [System.IO.File]::ReadAllText($bodyPath, [System.Text.Encoding]::UTF8)
-$json = @{ tag_name = $Tag; name = "DiffStudio 0.1.0"; body = $releaseBody; draft = $false; prerelease = $false } | ConvertTo-Json
+$title = "DiffStudio " + ($Tag -replace '^v', '')
+$json = @{ tag_name = $Tag; name = $title; body = $releaseBody; draft = $false; prerelease = $false } | ConvertTo-Json
 $jsonBytes = [System.Text.Encoding]::UTF8.GetBytes($json)
 
 Write-Host "Creating release $Tag ..."
@@ -49,7 +51,7 @@ Write-Host "Release created: $($release.html_url)"
 
 $file = Get-Item $Installer
 $name = $file.Name
-Write-Host ("Uploading {0} ({1:N1} MB) ..." -f $name, ($file.Length / 1MB))
+Write-Host "Uploading $name ($([math]::Round($file.Length / 1MB, 1)) MB) ..."
 $upload = "https://uploads.github.com/repos/$Owner/$Repo/releases/$($release.id)/assets?name=$([uri]::EscapeDataString($name))"
 $asset = Invoke-RestMethod -Method Post -Uri $upload -Headers $headers `
   -ContentType "application/octet-stream" -InFile $file.FullName

@@ -1,6 +1,6 @@
 {
   "name": "diffstudio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Beyond Compare-inspired desktop application for comparing, merging, and synchronizing files and folders.",
   "main": "main.js",
   "scripts": {

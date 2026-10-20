@@ -3,7 +3,7 @@
 All notable changes to DiffStudio are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.1.1 — 2026-10-20
 
 ### Added
 
