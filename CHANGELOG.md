@@ -7,6 +7,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Replacement rules (替换规则)** — text compare accepts `/regex/=>replacement`
+  rules (no slashes = literal match). Rules rewrite the text **before**
+  comparing, so differences in timestamps, version numbers and build IDs are
+  ignored. Files are never modified and the panes still show the original text.
+  Invalid rules are reported inline. New module `core/replacement.js`.
 - **Unimportant rules (重要/不重要)** — text compare accepts regex rules
   (one per line or `;`-separated). Differences caused only by matching text
   are downgraded to `unimportant`: grey instead of yellow, excluded from
@@ -33,10 +38,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Verification
 
-- Unit: 256/256 (`npm test`, includes `test/p0-features.test.js` 77 checks and
-  `test/unimportant.test.js` 21 checks).
-- E2E: 125/125 unchanged, plus 28 targeted checks (`npm run test:p0`) and
-  7 UI checks for unimportant rules (`node test/unimportant-ui.js`).
+- Unit: 287/287 (`npm test`, includes `test/p0-features.test.js` 77 checks,
+  `test/unimportant.test.js` 21 checks and `test/replacement.test.js` 31 checks).
+- E2E: 125/125 unchanged, plus 28 targeted checks (`npm run test:p0`),
+  7 UI checks for unimportant rules (`node test/unimportant-ui.js`) and
+  9 UI checks for replacement rules (`node test/replacement-ui.js`).
 
 ## 0.1.0 — 2026-10-20
 

@@ -18,6 +18,7 @@
 
 import { buildDiffLines, makeEquality, countChangedRows } from '../core/diff.js';
 import { compileRules, markUnimportant, countUnimportant } from '../core/unimportant.js';
+import { compileReplacements, replaceLines, countAffected } from '../core/replacement.js';
 import { realignWithAnchors } from '../core/align.js';
 import { buildPatch, toUnifiedPatch, buildReport } from '../core/patch.js';
 import {
@@ -76,6 +77,8 @@ export function createTextCompareSession(container, context, initial = {}) {
     diffLines: [],
     /** 不重要文本规则原文（正则，每行或分号分隔多条） */
     unimportantRules: '',
+    /** 替换规则原文：比较前改写文本，形如 /pattern/=>replacement */
+    replaceRules: '',
     importantOnly: false,
     /** 每处连续差异块的首行在 diffLines 中的下标（差异导航用） */
     diffRows: [],
@@ -165,6 +168,14 @@ export function createTextCompareSession(container, context, initial = {}) {
     title: t('textCompare.importantOnlyHint'),
     'data-role': 'important-only',
   });
+  // 替换规则：比较前改写文本（只影响比较，不改文件），因此被替换部分不算差异。
+  const replaceRulesInput = el('input', {
+    class: 'find-input',
+    placeholder: t('textCompare.replaceRulesPlaceholder'),
+    title: t('textCompare.replaceRulesHint'),
+    'data-role': 'replace-rules',
+  });
+  const replaceRulesNote = el('span', { class: 'unimportant-note', 'data-role': 'replace-rules-count' });
 
   const navBar = el('div', { class: 'session-subbar' },
     btnPrev, btnNext, navLabel,
@@ -183,6 +194,8 @@ export function createTextCompareSession(container, context, initial = {}) {
     replaceInput, btnReplace, btnReplaceAll,
     el('span', { class: 'sep' }),
     unimportantInput, unimportantNote, btnImportant,
+    el('span', { class: 'sep' }),
+    replaceRulesInput, replaceRulesNote,
   );
 
   // --- 图例 ---
@@ -226,6 +239,14 @@ export function createTextCompareSession(container, context, initial = {}) {
   btnImportant.addEventListener('click', () => {
     state.importantOnly = !state.importantOnly;
     btnImportant.classList.toggle('active', state.importantOnly);
+    renderComparison();
+  });
+  // 替换规则同样在回车 / 失焦时生效：它会改变整份文本的行结构，不宜逐字符触发。
+  replaceRulesInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { state.replaceRules = replaceRulesInput.value; renderComparison(); }
+  });
+  replaceRulesInput.addEventListener('change', () => {
+    state.replaceRules = replaceRulesInput.value;
     renderComparison();
   });
 
@@ -318,13 +339,23 @@ export function createTextCompareSession(container, context, initial = {}) {
       return equal;
     };
 
+    // 替换规则：在对齐之前改写文本，被替换的部分不参与比较。
+    // 只在两边都应用同一套规则，所以不会凭空造出差异。
+    const repCompiled = compileReplacements(state.replaceRules || '');
+    state.replaceRulesInvalid = !repCompiled.ok;
+    const repRules = repCompiled.ok ? repCompiled.rules : [];
+    const leftCmp = replaceLines(state.leftLines, repRules).lines;
+    const rightCmp = replaceLines(state.rightLines, repRules).lines;
+
     const diffLines = state.anchors.length
-      ? realignWithAnchors(state.leftLines, state.rightLines, state.anchors, cmp)
-      : buildDiffLines(state.leftLines, state.rightLines, cmp);
+      ? realignWithAnchors(leftCmp, rightCmp, state.anchors, cmp)
+      : buildDiffLines(leftCmp, rightCmp, cmp);
+    // diff 行的 aLine / bLine 目前指向"替换后"的行；换回原文，供显示、导出、编辑使用。
+    const withOriginal = attachOriginal(diffLines, state.leftLines, state.rightLines);
     // 不重要规则：后处理把"只在不重要文本上不同"的行降级，不改动 diff 引擎。
     const compiled = compileRules(state.unimportantRules || '');
     state.unimportantRulesInvalid = !compiled.ok;
-    const marked = compiled.ok ? markUnimportant(diffLines, compiled.rules) : diffLines;
+    const marked = compiled.ok ? markUnimportant(withOriginal, compiled.rules) : withOriginal;
     // 隔离视图：只渲染一个区域，但行号保持文件中的真实行号
     const w = state.window;
     state.allDiffLines = marked;
@@ -380,6 +411,14 @@ export function createTextCompareSession(container, context, initial = {}) {
       : ignorable
         ? t('textCompare.unimportantCount', { n: ignorable })
         : '';
+    // 替换规则提示：显示规则影响了多少行，让"为什么没差异"有据可查。
+    replaceRulesNote.textContent = state.replaceRulesInvalid
+      ? t('textCompare.replaceRulesInvalid')
+      : repRules.length
+        ? t('textCompare.replaceRulesCount', {
+          n: countAffected(state.leftLines, repRules) + countAffected(state.rightLines, repRules),
+        })
+        : '';
     // 行尾符提示：只在实际存在差异时提示。
     const le = [...eolKinds(state.leftLines)].map(eolName).join('/') || eolName('');
     const re = [...eolKinds(state.rightLines)].map(eolName).join('/') || eolName('');
@@ -400,8 +439,32 @@ export function createTextCompareSession(container, context, initial = {}) {
     }
   }
 
-  function render(diffLines) {
-    leftRows.innerHTML = '';
+  /**
+   * 取用于显示的文本：优先原文行（aLine / bLine），没有时退回比较文本。
+   * 替换规则只改写用于比较的副本，界面上必须始终显示文件真实内容。
+   */
+  function displayText(original, compared) {
+    if (original && typeof original === 'object' && 'body' in original) return original.body ?? '';
+    if (typeof original === 'string') return original;
+    return compared ?? '';
+  }
+
+  /**
+   * 用原文行修正 diff 结果的 aLine / bLine，让「比较用文本」与「显示用文本」分离。
+   * 行号可能是 -1（该侧无对应行）或缺失（对齐结果），此时保持原样。
+   */
+  function attachOriginal(diffLines, leftLines, rightLines) {
+    const pick = (idx, lines, fallback) => (
+      Number.isInteger(idx) && idx >= 0 && idx < lines.length ? lines[idx] : fallback
+    );
+    return diffLines.map((row) => ({
+      ...row,
+      aLine: pick(row.aIdx, leftLines, row.aLine),
+      bLine: pick(row.bIdx, rightLines, row.bLine),
+    }));
+  }
+
+  function render(diffLines) {    leftRows.innerHTML = '';
     rightRows.innerHTML = '';
 
     const fragL = document.createDocumentFragment();
@@ -416,12 +479,15 @@ export function createTextCompareSession(container, context, initial = {}) {
       lRow.append(el('span', { class: 'gutter', text: d.aIdx >= 0 ? String(d.aIdx + 1) : '', 'data-role': 'gutter-left' }));
       if (state.bookmarks.has(i)) lRow.classList.add('bookmarked');
       const lCode = el('span', { class: 'code' });
+      // 显示层用原文（aLine）：替换规则只影响比较，不能改写用户看到的文本。
+      const lText = displayText(d.aLine, d.a);
+      const rText = displayText(d.bLine, d.b);
       if (d.kind === 'change' && d.removed && d.added) {
-        lCode.innerHTML = renderInlineHighlight(diffChars(d.removed.text, d.added.text).filter((c) => c.kind !== 'add'));
+        lCode.innerHTML = renderInlineHighlight(diffChars(lText, rText).filter((c) => c.kind !== 'add'));
       } else {
-        lCode.textContent = d.a ?? '';
+        lCode.textContent = lText;
       }
-      markEmpty(lCode, d.a);
+      markEmpty(lCode, lText);
       lRow.append(lCode);
       bindRow(lRow, i);
       fragL.append(lRow);
@@ -432,11 +498,11 @@ export function createTextCompareSession(container, context, initial = {}) {
       if (state.bookmarks.has(i)) rRow.classList.add('bookmarked');
       const rCode = el('span', { class: 'code' });
       if (d.kind === 'change' && d.removed && d.added) {
-        rCode.innerHTML = renderInlineHighlight(diffChars(d.removed.text, d.added.text).filter((c) => c.kind !== 'del'));
+        rCode.innerHTML = renderInlineHighlight(diffChars(lText, rText).filter((c) => c.kind !== 'del'));
       } else {
-        rCode.textContent = d.b ?? '';
+        rCode.textContent = rText;
       }
-      markEmpty(rCode, d.b);
+      markEmpty(rCode, rText);
       rRow.append(rCode);
       bindRow(rRow, i);
       fragR.append(rRow);
@@ -930,8 +996,9 @@ export function createTextCompareSession(container, context, initial = {}) {
   async function exportReport(format = 'html') {
     const rows = state.diffLines.map((d) => ({
       status: d.kind,
-      left: d.a ?? '',
-      right: d.b ?? '',
+      // 报告同样导出原文，避免把替换后的文本写进给用户看的文件。
+      left: displayText(d.aLine, d.a),
+      right: displayText(d.bLine, d.b),
     }));
     const report = buildReport({
       title: t('textCompare.reportTitle'),
