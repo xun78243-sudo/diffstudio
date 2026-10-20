@@ -7,6 +7,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Syntax highlighting (语法高亮)** — text compare colourises comments,
+  strings, numbers and keywords for JavaScript/TypeScript, Python, Java, C/C++,
+  JSON, XML/HTML, SQL and Shell. The language is detected from the left file
+  extension and can be overridden; a manual choice stays pinned. Colours and
+  inline difference markers coexist. New module `core/syntax.js`.
 - **Column rules for table compare (表格列规则)** — each column can be compared
   with its own rules: `ignore` (skip the column), `case` (ignore case), `trim`,
   `numeric` (`1.0` equals `1`), and `regex:<pattern>` (compare only the matched
@@ -42,13 +47,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Verification
 
-- Unit: 318/318 (`npm test`, includes `test/p0-features.test.js` 77 checks,
-  `test/unimportant.test.js` 21 checks, `test/replacement.test.js` 31 checks and
-  `test/columnRules.test.js` 31 checks).
+- Unit: 348/348 (`npm test`, includes `test/p0-features.test.js` 77 checks,
+  `test/unimportant.test.js` 21 checks, `test/replacement.test.js` 31 checks,
+  `test/columnRules.test.js` 31 checks and `test/syntax.test.js` 30 checks).
 - E2E: 125/125 unchanged, plus 28 targeted checks (`npm run test:p0`),
   7 UI checks for unimportant rules (`node test/unimportant-ui.js`),
-  9 UI checks for replacement rules (`node test/replacement-ui.js`) and
-  6 UI checks for column rules (`node test/columnRules-ui.js`).
+  9 UI checks for replacement rules (`node test/replacement-ui.js`),
+  6 UI checks for column rules (`node test/columnRules-ui.js`) and
+  10 UI checks for syntax highlighting (`node test/syntax-ui.js`).
 
 ## 0.1.0 — 2026-10-20
 

@@ -32,7 +32,9 @@ import {
   eolName,
   joinLines,
   EMPTY_LINE_MARK,
+  escapeHtml,
 } from '../core/ui.js';
+import { tokenizeLine, detectLanguage, LANGUAGES } from '../core/syntax.js';
 import { setStatus } from '../core/status.js';
 import { ENCODINGS } from '../core/encoding.js';
 
@@ -79,6 +81,8 @@ export function createTextCompareSession(container, context, initial = {}) {
     unimportantRules: '',
     /** 替换规则原文：比较前改写文本，形如 /pattern/=>replacement */
     replaceRules: '',
+    /** 语法高亮语言（自动按扩展名识别，可手动覆盖） */
+    syntaxLang: 'none',
     importantOnly: false,
     /** 每处连续差异块的首行在 diffLines 中的下标（差异导航用） */
     diffRows: [],
@@ -124,11 +128,16 @@ export function createTextCompareSession(container, context, initial = {}) {
   const encSelect = el('select', { class: 'toolbar-select', title: t('textCompare.encodingHint'), 'data-role': 'encoding' },
     ...ENCODINGS.map((id) => el('option', { value: id, text: t('encoding.' + id) })));
 
+  // 语法高亮语言选择：默认按左侧文件扩展名自动识别，用户可手动覆盖。
+  const syntaxSelect = el('select', { class: 'toolbar-select', title: t('textCompare.syntaxHint'), 'data-role': 'syntax-lang' },
+    ...Object.entries(LANGUAGES).map(([key, def]) => el('option', { value: key, text: def.label })));
+  syntaxSelect.value = 'none';
+
   const toolbar = el('div', { class: 'session-toolbar' },
     el('span', { text: t('common.sideLeft') }), leftInput, btnLeft,
     el('span', { text: t('common.sideRight') }), rightInput, btnRight,
     el('span', { class: 'spacer' }),
-    encSelect, btnIgnoreWs, btnIgnoreCase, btnEdit, btnSave, btnLayout, btnRefresh,
+    encSelect, btnIgnoreWs, btnIgnoreCase, syntaxSelect, btnEdit, btnSave, btnLayout, btnRefresh,
   );
 
   // --- 差异导航 / 书签 / 查找（第二行工具栏） ---
@@ -236,6 +245,13 @@ export function createTextCompareSession(container, context, initial = {}) {
     state.unimportantRules = unimportantInput.value;
     renderComparison();
   });
+  // 手动选择语言后固定下来，重新打开文件也不再被扩展名覆盖。
+  syntaxSelect.addEventListener('change', () => {
+    state.syntaxLang = syntaxSelect.value;
+    state.syntaxLangPinned = true;
+    renderComparison();
+  });
+
   btnImportant.addEventListener('click', () => {
     state.importantOnly = !state.importantOnly;
     btnImportant.classList.toggle('active', state.importantOnly);
@@ -311,6 +327,11 @@ export function createTextCompareSession(container, context, initial = {}) {
     });
     state.leftLines = splitLines(l.text);
     state.rightLines = splitLines(r.text);
+    // 语法高亮：按左侧扩展名自动识别（用户手动选过的语言保留，不被覆盖）。
+    if (!state.syntaxLangPinned) {
+      state.syntaxLang = detectLanguage(state.leftPath);
+      syntaxSelect.value = state.syntaxLang;
+    }
     state.leftSize = l.text.length;
     state.rightSize = r.text.length;
     state.bookmarks.clear();
@@ -464,6 +485,60 @@ export function createTextCompareSession(container, context, initial = {}) {
     }));
   }
 
+  /**
+   * 行内差异高亮：按 token 着色，再把差异片段单独包一层底纹。
+   * 这样语法颜色和差异底纹可以共存——差异行不会退化成一整片无色文本。
+   */
+  function renderDiffLine(text, lang, keepKind, otherText) {
+    const chunks = diffChars(text, otherText).filter((c) => c.kind !== keepKind);
+    if (!lang || lang === 'none') return renderInlineHighlight(chunks);
+    // 把 chunks 的边界映射到字符数组，再按 token 切分输出。
+    const marks = new Array(text.length).fill(false);
+    let pos = 0;
+    for (const c of chunks) {
+      // 只有「本侧独有的片段」才是差异位置；same 片段必须跳过，否则整行都会被底纹覆盖。
+      if (c.kind !== 'same') {
+        for (let k = 0; k < c.text.length; k++) marks[pos + k] = true;
+      }
+      pos += c.text.length;
+    }
+    // 本侧保留的差异片段类别：左窗格是 del，右窗格是 add。
+    const diffKind = keepKind === 'add' ? 'del' : 'add';
+    const diffCls = diffKind === 'add' ? 'add-w' : 'del-w';
+    let out = '';
+    let at = 0;
+    for (const tk of tokenizeLine(text, lang)) {
+      const cls = tk.type === 'plain' ? '' : `tok-${tk.type}`;
+      // 逐字符判断是否处于差异片段，保证高亮边界与 token 无关。
+      let run = '';
+      let runDiff = marks[at] === true;
+      const flush = () => {
+        if (!run) return;
+        const inner = escapeHtml(run);
+        const span = cls ? `<span class="${cls}">${inner}</span>` : inner;
+        out += runDiff ? `<span class="${diffCls}">${span}</span>` : span;
+        run = '';
+      };
+      for (let k = 0; k < tk.text.length; k++) {
+        const isDiff = marks[at + k] === true;
+        if (isDiff !== runDiff) { flush(); runDiff = isDiff; }
+        run += tk.text[k];
+      }
+      flush();
+      at += tk.text.length;
+    }
+    return out;
+  }
+
+  function colorize(text, lang) {
+    if (!lang || lang === 'none') return null;
+    const tokens = tokenizeLine(text, lang);
+    if (!tokens.length) return null;
+    return tokens
+      .map((tk) => (tk.type === 'plain' ? escapeHtml(tk.text) : `<span class="tok-${tk.type}">${escapeHtml(tk.text)}</span>`))
+      .join('');
+  }
+
   function render(diffLines) {    leftRows.innerHTML = '';
     rightRows.innerHTML = '';
 
@@ -483,9 +558,12 @@ export function createTextCompareSession(container, context, initial = {}) {
       const lText = displayText(d.aLine, d.a);
       const rText = displayText(d.bLine, d.b);
       if (d.kind === 'change' && d.removed && d.added) {
-        lCode.innerHTML = renderInlineHighlight(diffChars(lText, rText).filter((c) => c.kind !== 'add'));
+        lCode.innerHTML = renderDiffLine(lText, state.syntaxLang, 'add', rText);
       } else {
-        lCode.textContent = lText;
+        // 只在"没有行内差异高亮"的行上着色，避免两种背景色互相干扰。
+        const html = colorize(lText, state.syntaxLang);
+        if (html !== null) lCode.innerHTML = html;
+        else lCode.textContent = lText;
       }
       markEmpty(lCode, lText);
       lRow.append(lCode);
@@ -498,9 +576,11 @@ export function createTextCompareSession(container, context, initial = {}) {
       if (state.bookmarks.has(i)) rRow.classList.add('bookmarked');
       const rCode = el('span', { class: 'code' });
       if (d.kind === 'change' && d.removed && d.added) {
-        rCode.innerHTML = renderInlineHighlight(diffChars(lText, rText).filter((c) => c.kind !== 'del'));
+        rCode.innerHTML = renderDiffLine(rText, state.syntaxLang, 'del', lText);
       } else {
-        rCode.textContent = rText;
+        const html = colorize(rText, state.syntaxLang);
+        if (html !== null) rCode.innerHTML = html;
+        else rCode.textContent = rText;
       }
       markEmpty(rCode, rText);
       rRow.append(rCode);

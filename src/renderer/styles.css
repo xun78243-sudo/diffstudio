@@ -338,6 +338,11 @@ body { display: flex; flex-direction: column; }
 .unimportant-note { color: var(--fg-muted, #6b7280); margin-left: 6px; }
 /* 规则输入框：单行高度与输入框对齐，允许输入多行。 */
 .rules-input { resize: vertical; min-height: 26px; max-height: 120px; width: 200px; font: inherit; }
+/* 语法高亮 token：低饱和配色，保证叠加在差异底色上仍可读。 */
+.tok-comment { color: #6a9955; font-style: italic; }
+.tok-string { color: #a31515; }
+.tok-number { color: #098658; }
+.tok-keyword { color: #0000ff; font-weight: 600; }
 /* 只看重要差异：把不重要行整体淡化，行数与索引保持不变。 */
 .important-only .row.kind-unimportant { opacity: 0.35; }
 .row.kind-conflict { background: var(--c-conflict); }
