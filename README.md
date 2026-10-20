@@ -140,13 +140,13 @@ the one-checked-language invariant and saves one screenshot per menu.
 layers (diff, merge, line splitting, CSV, i18n, glob masks, Unified Diff,
 manual alignment, pixel comparison, folder patch planning, exclude matching,
 double-click view selection) in plain Node.
-Current result: **125/125 E2E checks and 158/158 unit checks passing**
-(`npm test` and `npm run test:e2e`). The E2E suite was run three times in a row
-against one app instance; it mutates its own fixtures, so the sync/patch cases
+Result at release **0.1.0**: **125/125 E2E checks and 158/158 unit checks
+passing** (`npm test` and `npm run test:e2e`), re-run against the final
+release build. The E2E suite mutates its own fixtures, so the sync/patch cases
 snapshot and restore the directory they touch. A separate 73-check audit
 harness (three full passes, in Beyond Compare terms) also passed 73/73 three
 times in a row, both with `electron .` and with the installed
-`DiffStudio-Setup-0.1.0.exe`.
+`DiffStudio-Setup-0.1.0.exe`. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 Found and fixed during verification:
 
