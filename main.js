@@ -210,6 +210,56 @@ ipcMain.handle('fs:mkdir', async (e, dirPath) => {
   return true;
 });
 
+/**
+ * 重命名：只在同一目录内改名。
+ *
+ * 目标已存在时直接失败，不覆盖——BC 的重命名同样如此，覆盖是独立的破坏性操作。
+ */
+ipcMain.handle('fs:rename', async (e, from, to) => {
+  const src = assertAbs(from);
+  const dest = assertAbs(to);
+  if (fs.existsSync(dest)) return { ok: false, reason: 'exists' };
+  fs.renameSync(src, dest);
+  return { ok: true };
+});
+
+/**
+ * 移动：允许跨目录、跨盘。跨盘时 renameSync 会抛 EXDEV，
+ * 这种情况退回"复制 + 删除源"。
+ */
+ipcMain.handle('fs:move', async (e, from, to) => {
+  const src = assertAbs(from);
+  const dest = assertAbs(to);
+  if (fs.existsSync(dest)) return { ok: false, reason: 'exists' };
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  try {
+    fs.renameSync(src, dest);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    fs.cpSync(src, dest, { recursive: true });
+    fs.rmSync(src, { recursive: true, force: true });
+  }
+  return { ok: true };
+});
+
+/** 修改时间戳（Touch）：只动 mtime，不碰内容。 */
+ipcMain.handle('fs:touch', async (e, target, timeMs) => {
+  const t = assertAbs(target);
+  const ms = Number(timeMs);
+  if (!Number.isFinite(ms)) throw new Error('A numeric timestamp is required');
+  const date = new Date(ms);
+  fs.utimesSync(t, date, date);
+  return { ok: true };
+});
+
+/** 读取任意大小文件的原始字节：压缩包解析需要完整内容，256 MB 上限够用。 */
+ipcMain.handle('fs:read-raw', async (e, filePath, maxBytes = 256 * 1024 * 1024) => {
+  const file = assertAbs(filePath);
+  const st = fs.statSync(file);
+  if (st.size > maxBytes) return { tooBig: true, size: st.size };
+  return { tooBig: false, size: st.size, data: fs.readFileSync(file) };
+});
+
 /** 检查路径存在与否，供界面在"复制/删除"后判断条目是否已消失。 */
 ipcMain.handle('fs:exists', async (e, target) => {
   try {

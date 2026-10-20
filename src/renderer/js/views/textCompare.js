@@ -17,6 +17,7 @@
  */
 
 import { buildDiffLines, makeEquality, countChangedRows } from '../core/diff.js';
+import { compileRules, markUnimportant, countUnimportant } from '../core/unimportant.js';
 import { realignWithAnchors } from '../core/align.js';
 import { buildPatch, toUnifiedPatch, buildReport } from '../core/patch.js';
 import {
@@ -73,6 +74,9 @@ export function createTextCompareSession(container, context, initial = {}) {
     leftLines: [],
     rightLines: [],
     diffLines: [],
+    /** 不重要文本规则原文（正则，每行或分号分隔多条） */
+    unimportantRules: '',
+    importantOnly: false,
     /** 每处连续差异块的首行在 diffLines 中的下标（差异导航用） */
     diffRows: [],
     cursor: -1,
@@ -147,6 +151,20 @@ export function createTextCompareSession(container, context, initial = {}) {
   const replaceInput = el('input', { class: 'find-input', placeholder: t('textCompare.replacePlaceholder'), 'data-role': 'replace-input' });
   const btnReplace = el('button', { class: 'icon-btn', text: t('textCompare.replace'), title: t('textCompare.replaceHint'), 'data-role': 'replace' });
   const btnReplaceAll = el('button', { class: 'icon-btn', text: t('textCompare.replaceAll'), title: t('textCompare.replaceAllHint'), 'data-role': 'replace-all' });
+  // 不重要文本规则：命中的差异降级为"不重要"，不计入差异数、导航时跳过。
+  const unimportantInput = el('input', {
+    class: 'find-input',
+    placeholder: t('textCompare.unimportantPlaceholder'),
+    title: t('textCompare.unimportantHint'),
+    'data-role': 'unimportant-rules',
+  });
+  const unimportantNote = el('span', { class: 'unimportant-note', 'data-role': 'unimportant-count' });
+  const btnImportant = el('button', {
+    class: 'icon-btn',
+    text: t('textCompare.importantOnly'),
+    title: t('textCompare.importantOnlyHint'),
+    'data-role': 'important-only',
+  });
 
   const navBar = el('div', { class: 'session-subbar' },
     btnPrev, btnNext, navLabel,
@@ -163,6 +181,8 @@ export function createTextCompareSession(container, context, initial = {}) {
     findInput, btnFindPrev, btnFindNext,
     el('span', { class: 'sep' }),
     replaceInput, btnReplace, btnReplaceAll,
+    el('span', { class: 'sep' }),
+    unimportantInput, unimportantNote, btnImportant,
   );
 
   // --- 图例 ---
@@ -171,6 +191,7 @@ export function createTextCompareSession(container, context, initial = {}) {
     legendItem('var(--c-left)', t('textCompare.legendLeft')),
     legendItem('var(--c-right)', t('textCompare.legendRight')),
     legendItem('var(--c-change)', t('textCompare.legendChange')),
+    legendItem('var(--c-unimportant)', t('textCompare.legendUnimportant')),
     eolNote,
   );
 
@@ -193,6 +214,20 @@ export function createTextCompareSession(container, context, initial = {}) {
   function legendItem(color, text) {
     return el('div', { class: 'it' }, el('span', { class: 'sw', style: `background:${color}` }), el('span', { text }));
   }
+
+  // 不重要规则在回车或失焦时重新比较，避免每敲一个字符就重算整份 diff。
+  unimportantInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { state.unimportantRules = unimportantInput.value; renderComparison(); }
+  });
+  unimportantInput.addEventListener('change', () => {
+    state.unimportantRules = unimportantInput.value;
+    renderComparison();
+  });
+  btnImportant.addEventListener('click', () => {
+    state.importantOnly = !state.importantOnly;
+    btnImportant.classList.toggle('active', state.importantOnly);
+    renderComparison();
+  });
 
   /** 通知外壳：用户已打开这些文件（最近打开 / 重启恢复都依赖它）。 */
   function notePaths() {
@@ -286,9 +321,13 @@ export function createTextCompareSession(container, context, initial = {}) {
     const diffLines = state.anchors.length
       ? realignWithAnchors(state.leftLines, state.rightLines, state.anchors, cmp)
       : buildDiffLines(state.leftLines, state.rightLines, cmp);
+    // 不重要规则：后处理把"只在不重要文本上不同"的行降级，不改动 diff 引擎。
+    const compiled = compileRules(state.unimportantRules || '');
+    state.unimportantRulesInvalid = !compiled.ok;
+    const marked = compiled.ok ? markUnimportant(diffLines, compiled.rules) : diffLines;
     // 隔离视图：只渲染一个区域，但行号保持文件中的真实行号
     const w = state.window;
-    state.allDiffLines = diffLines;
+    state.allDiffLines = marked;
     // 行索引映射：渲染行号 -> 全文行号。隔离视图下两者不同，
     // selected/cursor/diffRows 一律用全文行号，避免折叠后点到错行、或者
     // 再点一次「隔离」时用过滤后的索引去切全文数组（表现为按钮无反应）。
@@ -306,18 +345,19 @@ export function createTextCompareSession(container, context, initial = {}) {
       return false;
     };
     state.diffLines = w
-      ? diffLines.filter((r, i) => {
+      ? marked.filter((r, i) => {
         const keep = inWindow(r.aIdx == null ? -1 : r.aIdx, r.bIdx == null ? -1 : r.bIdx);
         if (keep) state.fullIndex.push(i);
         return keep;
       })
-      : (state.fullIndex = diffLines.map((_, i) => i), diffLines);
+      : (state.fullIndex = marked.map((_, i) => i), marked);
 
     // 差异导航锚点：每处连续差异块的第一行（全文行号）。
+    // 不重要的块不进入导航，否则「跳到下一处差异」会停在用户明确忽略的内容上。
     state.diffRows = [];
     let prevChanged = false;
-    for (let i = 0; i < diffLines.length; i++) {
-      const changed = diffLines[i].kind !== 'same';
+    for (let i = 0; i < marked.length; i++) {
+      const changed = marked[i].kind !== 'same' && marked[i].kind !== 'unimportant';
       if (changed && !prevChanged) state.diffRows.push(i);
       prevChanged = changed;
     }
@@ -331,7 +371,15 @@ export function createTextCompareSession(container, context, initial = {}) {
     // 只渲染过滤后的行（隔离视图下就是那一个块），行号仍来自全文。
     render(state.diffLines);
 
-    const changed = countChangedRows(diffLines);
+    const changed = countChangedRows(marked);
+    const ignorable = countUnimportant(marked);
+    // 「只看重要差异」把不重要行整行淡化，不改变行数与索引，避免行号/书签错位。
+    if (root) root.classList.toggle('important-only', state.importantOnly);
+    unimportantNote.textContent = state.unimportantRulesInvalid
+      ? t('textCompare.unimportantInvalid')
+      : ignorable
+        ? t('textCompare.unimportantCount', { n: ignorable })
+        : '';
     // 行尾符提示：只在实际存在差异时提示。
     const le = [...eolKinds(state.leftLines)].map(eolName).join('/') || eolName('');
     const re = [...eolKinds(state.rightLines)].map(eolName).join('/') || eolName('');

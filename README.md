@@ -8,8 +8,9 @@ synchronizing files and folders. Built with Electron.
 | Module | Status |
 | --- | --- |
 | 文本比较 Text Compare | Working — line diff, inline character highlight, difference navigation, find, bookmarks, inline editing, copy to the other side, ignore whitespace/case, encoding picker (auto / UTF-8 / UTF-8 BOM / UTF-16 LE/BE / GB18030 / Latin-1), saves keep the encoding the file was read with |
-| 文件夹比较 Folder Compare | Working — recursive tree, content comparison (256 MB per file), filename mask + excluded folders, display filter, per-row copy, double-click opens text compare |
+| 文件夹比较 Folder Compare | Working — recursive tree, content comparison (256 MB per file), filename mask + excluded folders, display filter, per-row copy, double-click opens text compare, rename / new folder / touch / move, find in files, read-only archive compare (zip / tar / tgz / gz) |
 | 文件夹同步 Folder Sync | Working — folder-grouped items, batch select, per-item actions, copy + confirmed delete, re-analysis after a run |
+| 文件夹三路合并 3-Way Folder Merge | Working — base/left/right plane classification, auto-merge of one-sided changes, conflicts never auto-resolved, apply to either side with undo |
 | 三路合并 3-Way Merge | Working — diff3 alignment, conflict detection, take left/right/base |
 | 十六进制比较 Hex Compare | Working — byte-level diff with hex + ASCII, previous/next difference, editing by `offset:byte` and saving, 16 MB per file with virtualised rendering |
 | 表格比较 Table Compare | Working — CSV row/column diff with a shared column order and widths |
@@ -89,6 +90,10 @@ src/renderer/
   js/core/patch.js          Unified Diff build/parse/apply, HTML + text reports
   js/core/align.js          Manual alignment (Align With) re-pairing
   js/core/imageDiff.js      Pixel comparison, difference regions, zoom maths
+  js/core/fileOps.js        Rename / move / new-folder / touch plans and name validation
+  js/core/search.js         Find-in-files regex building and per-line hit extraction
+  js/core/archive.js        ZIP / TAR / GZIP parsing (no third-party dependency)
+  js/core/folderMerge.js    Three-way folder plane classification and merge plan
   js/views/*.js             One file per session type
 ```
 
@@ -142,7 +147,10 @@ manual alignment, pixel comparison, folder patch planning, exclude matching,
 double-click view selection) in plain Node.
 Result at release **0.1.0**: **125/125 E2E checks and 158/158 unit checks
 passing** (`npm test` and `npm run test:e2e`), re-run against the final
-release build. The E2E suite mutates its own fixtures, so the sync/patch cases
+release build. After 0.1.0 the suite grew to **235 unit checks** plus
+**28 targeted checks** for file operations, find-in-files, three-way folder
+merge and archive comparison (`npm run test:p0`, needs the app running with
+`--remote-debugging-port=9222`). The E2E suite mutates its own fixtures, so the sync/patch cases
 snapshot and restore the directory they touch. A separate 73-check audit
 harness (three full passes, in Beyond Compare terms) also passed 73/73 three
 times in a row, both with `electron .` and with the installed

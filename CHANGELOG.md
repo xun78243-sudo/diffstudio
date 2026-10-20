@@ -3,6 +3,41 @@
 All notable changes to DiffStudio are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- **Unimportant rules (重要/不重要)** — text compare accepts regex rules
+  (one per line or `;`-separated). Differences caused only by matching text
+  are downgraded to `unimportant`: grey instead of yellow, excluded from
+  difference navigation, and counted separately. Invalid regex is reported
+  inline instead of breaking the view. New module `core/unimportant.js`.
+- **File operations in Folder Compare** — rename, new folder, touch
+  (timestamp), and move to the opposite side. Every action is validated
+  before it touches disk (illegal characters, reserved names, duplicate
+  names, trailing dot/space), and none of them overwrites an existing item.
+- **Find in files** — text search across both compared folders with per-file
+  grouped results.
+- **Archive compare** — open a zip / tar / tgz / gz on either side and compare
+  it as a folder tree. Implemented without third-party dependencies; entry
+  paths are normalised so `..` / absolute entries cannot escape the temp
+  directory (zip-slip).
+- **3-Way Folder Merge** — new session type: base / left / right plane
+  classification, auto-merge of one-sided changes, conflicts are never
+  auto-resolved, apply to either side with per-operation undo and backups.
+- New IPC: `fs:rename`, `fs:move`, `fs:touch`, `fs:read-raw`.
+
+### Docs
+
+- `docs/bc5-feature-gap.md` — verified feature gaps against Beyond Compare 5.
+
+### Verification
+
+- Unit: 256/256 (`npm test`, includes `test/p0-features.test.js` 77 checks and
+  `test/unimportant.test.js` 21 checks).
+- E2E: 125/125 unchanged, plus 28 targeted checks (`npm run test:p0`) and
+  7 UI checks for unimportant rules (`node test/unimportant-ui.js`).
+
 ## 0.1.0 — 2026-10-20
 
 First public release: a Beyond Compare-inspired desktop tool for comparing,

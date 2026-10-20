@@ -16,6 +16,11 @@ import { viewerFor } from '../core/viewer.js';
 import { planFolderPatch, describePlan, describeOp, patchReportModel } from '../core/folderPatch.js';
 import { buildReport } from '../core/patch.js';
 import { setStatus } from '../core/status.js';
+import {
+  planRename, planMove, planNewFolder, parseTouchTime, existingNames,
+  baseName as pathBaseName, dirName as pathDirName,
+} from '../core/fileOps.js';
+import { readArchive, readZipEntry, inflateGzip, gzipEntries, parseTar, detectArchiveFormat } from '../core/archive.js';
 
 const S = {
   SAME: 'same',
@@ -77,12 +82,24 @@ export function createFolderCompareSession(container, context, initial = {}) {
   // 文件夹补丁：把一侧独有的文件（及可选的内容差异）"铺"到另一侧，先预览再执行。
   const btnPatch = el('button', { class: 'icon-btn', text: t('folderCompare.patchBtn'), title: t('folderCompare.patchHint'), 'data-role': 'folder-patch-btn' });
   const btnPatchReport = el('button', { class: 'icon-btn', text: t('folderCompare.patchReport'), title: t('folderCompare.patchReport'), 'data-role': 'folder-patch-report' });
+  // 文件操作：重命名 / 新建文件夹 / Touch / 移动，以及跨文件搜索与压缩包比较。
+  const btnRename = el('button', { class: 'icon-btn', text: t('folderCompare.rename'), title: t('folderCompare.rename'), 'data-role': 'rename' });
+  const btnNewFolder = el('button', { class: 'icon-btn', text: '+' + t('folderCompare.newFolder'), title: t('folderCompare.newFolder'), 'data-role': 'new-folder' });
+  const btnTouch = el('button', { class: 'icon-btn', text: t('folderCompare.touch'), title: t('folderCompare.touch'), 'data-role': 'touch' });
+  const btnMove = el('button', { class: 'icon-btn', text: t('folderCompare.move'), title: t('folderCompare.move'), 'data-role': 'move' });
+  const btnSearch = el('button', { class: 'icon-btn', text: t('folderCompare.search'), title: t('folderCompare.search'), 'data-role': 'find-in-files' });
+  const btnArchiveLeft = el('button', { class: 'icon-btn', text: '🗜', title: t('folderCompare.archiveHint'), 'data-role': 'archive-left' });
+  const btnArchiveRight = el('button', { class: 'icon-btn', text: '🗜', title: t('folderCompare.archiveHint'), 'data-role': 'archive-right' });
 
   const toolbar = el('div', { class: 'session-toolbar' },
     el('span', { text: t('common.sideLeft') }), leftInput, btnLeft,
     el('span', { text: t('common.sideRight') }), rightInput, btnRight,
     el('span', { class: 'spacer' }), btnSwap, btnPatch, btnReport, btnContent, btnCompare,
   );
+  // 第二行工具条：破坏性操作独立一行，避免误点到「比较」。
+  const opsBar = el('div', { class: 'sync-toolbar' },
+    btnRename, btnNewFolder, btnTouch, btnMove, btnSearch,
+    el('span', { class: 'spacer' }), btnArchiveLeft, btnArchiveRight);
 
   const maskInput = el('input', { class: 'mask', type: 'text', placeholder: t('folderCompare.maskPlaceholder'), title: t('folderCompare.maskHint'), 'data-role': 'mask' });
   const excludeInput = el('input', { class: 'exclude', type: 'text', placeholder: t('folderCompare.excludePlaceholder'), title: t('folderCompare.excludeHint'), 'data-role': 'exclude' });
@@ -120,7 +137,7 @@ export function createFolderCompareSession(container, context, initial = {}) {
       btnPatchLeft, btnPatchRight, btnPatchContent, btnPatchApply, btnPatchUndo, btnPatchClose),
     el('div', { class: 'folder-patch-body' }, patchList));
   patchPanel.hidden = true;
-  const root = el('div', { class: 'session' }, toolbar, filterBar, legend, treeWrap, patchPanel);
+  const root = el('div', { class: 'session' }, toolbar, opsBar, filterBar, legend, treeWrap, patchPanel);
   container.append(root);
 
   function renderLegend() {
@@ -734,6 +751,250 @@ export function createFolderCompareSession(container, context, initial = {}) {
       setStatus(t('folderCompare.compareFailed', { msg: err.message }));
     }
   }
+
+  // ---------------------------------------------------------------------
+  // 文件操作：重命名 / 新建文件夹 / Touch / 移动（都带前置校验）
+  // ---------------------------------------------------------------------
+
+  function errText(reason) {
+    switch (reason) {
+      case 'exists': return t('folderCompare.errExists');
+      case 'reserved': return t('folderCompare.errReserved');
+      case 'illegal': return t('folderCompare.errIllegal');
+      case 'trailingDotSpace': return t('folderCompare.errTrailing');
+      default: return t('folderCompare.errNameInvalid');
+    }
+  }
+
+  /** 找到某条目所在的基准目录与相对路径；两侧都有时优先左侧。 */
+  function locate(rel) {
+    const L = state.leftMap.get(rel);
+    if (L) return { item: L, base: state.left, map: state.leftMap, side: 'left' };
+    const R = state.rightMap.get(rel);
+    if (R) return { item: R, base: state.right, map: state.rightMap, side: 'right' };
+    return null;
+  }
+
+  /** 该条目所在目录下的现有名字（小写），用于查重。 */
+  function namesIn(dirPath) {
+    const out = [];
+    const maps = [state.leftMap, state.rightMap];
+    for (const map of maps) {
+      for (const item of map.values()) {
+        if (pathDirName(item.path).toLowerCase() === dirPath.toLowerCase()) out.push({ name: item.name });
+      }
+    }
+    return existingNames(out);
+  }
+
+  async function doRename() {
+    const rel = state.selected;
+    if (!rel) { setStatus(t('folderCompare.selectFirst')); return; }
+    const loc = locate(rel);
+    if (!loc) return;
+    const oldName = loc.item.name;
+    const input = window.prompt(t('folderCompare.renamePrompt', { name: oldName }), oldName);
+    if (input === null) return;
+    const plan = planRename(pathDirName(loc.item.path), oldName, input, namesIn(pathDirName(loc.item.path)));
+    if (!plan.ok) { setStatus(errText(plan.reason)); return; }
+    if (plan.noop) return;
+    try {
+      const r = await api.rename(plan.from, plan.to);
+      if (r && r.ok === false) { setStatus(errText(r.reason)); return; }
+      await compare();
+      setStatus(t('folderCompare.opDone', { name: plan.name }));
+    } catch (err) {
+      setStatus(t('folderCompare.compareFailed', { msg: err.message }));
+    }
+  }
+
+  async function doNewFolder() {
+    const dir = state.selected ? pathDirName(locate(state.selected).item.path) : state.right || state.left;
+    if (!dir) { setStatus(t('folderCompare.selectFirst')); return; }
+    const input = window.prompt(t('folderCompare.newFolderPrompt'), '');
+    if (input === null) return;
+    const plan = planNewFolder(dir, input, namesIn(dir));
+    if (!plan.ok) { setStatus(errText(plan.reason)); return; }
+    try {
+      await api.mkdir(plan.path);
+      await compare();
+      setStatus(t('folderCompare.folderCreated', { name: plan.name }));
+    } catch (err) {
+      setStatus(t('folderCompare.compareFailed', { msg: err.message }));
+    }
+  }
+
+  async function doTouch() {
+    const rel = state.selected;
+    if (!rel) { setStatus(t('folderCompare.selectFirst')); return; }
+    const loc = locate(rel);
+    const input = window.prompt(t('folderCompare.touchPrompt'), '');
+    if (input === null) return;
+    const ms = parseTouchTime(input);
+    if (ms === null) { setStatus(t('folderCompare.errNameInvalid')); return; }
+    try {
+      await api.touch(loc.item.path, ms);
+      await compare();
+      setStatus(t('folderCompare.touched', { name: loc.item.name }));
+    } catch (err) {
+      setStatus(t('folderCompare.compareFailed', { msg: err.message }));
+    }
+  }
+
+  /** 把选中条目移动到对侧的同名相对位置之外——这里移动"另一侧根目录下"。 */
+  async function doMove() {
+    const rel = state.selected;
+    if (!rel) { setStatus(t('folderCompare.selectFirst')); return; }
+    const loc = locate(rel);
+    const destBase = loc.side === 'left' ? state.right : state.left;
+    if (!destBase) { setStatus(t('folderCompare.needBoth')); return; }
+    if (!window.confirm(t('folderCompare.movePrompt', { name: loc.item.name }))) return;
+    const destDir = pathDirName(joinPath(destBase, rel));
+    const destTaken = namesIn(destDir);
+    const plan = planMove(pathDirName(loc.item.path), loc.item.name, destDir, destTaken);
+    if (!plan.ok) { setStatus(errText(plan.reason)); return; }
+    try {
+      const r = await api.move(plan.from, plan.to);
+      if (r && r.ok === false) { setStatus(errText(r.reason)); return; }
+      await compare();
+      setStatus(t('folderCompare.moved', { name: loc.item.name }));
+    } catch (err) {
+      setStatus(t('folderCompare.compareFailed', { msg: err.message }));
+    }
+  }
+
+  btnRename.addEventListener('click', doRename);
+  btnNewFolder.addEventListener('click', doNewFolder);
+  btnTouch.addEventListener('click', doTouch);
+  btnMove.addEventListener('click', doMove);
+
+  // ---------------------------------------------------------------------
+  // 查找文件内文本
+  // ---------------------------------------------------------------------
+
+  async function findInFiles() {
+    if (!state.left || !state.right) { setStatus(t('folderCompare.needBoth')); return; }
+    const query = window.prompt(t('folderCompare.searchQuery'), '');
+    if (!query) return;
+    setStatus(t('folderCompare.searchRunning'));
+    // 只搜文本：二进制文件没有"行"可言，按扩展名粗略过滤，避免把大文件全读进来。
+    const files = [];
+    for (const map of [state.leftMap, state.rightMap]) {
+      for (const [rel, item] of map) {
+        if (item.type === 'dir') continue;
+        if (item.size > 8 * 1024 * 1024) continue;
+        if (viewerFor(rel) !== 'text') continue;
+        files.push({ rel, path: item.path });
+      }
+    }
+    const hits = [];
+    let scanned = 0;
+    for (const f of files) {
+      let text;
+      try {
+        const r = await api.readText(f.path, 'auto');
+        if (r.binary) continue;
+        text = r.text;
+      } catch (e) { continue; }
+      scanned++;
+      const lines = [];
+      text.split(/\r\n|\n|\r/).forEach((line, i) => {
+        if (line.toLowerCase().includes(query.toLowerCase())) {
+          lines.push({ line: i + 1, text: line.length > 240 ? line.slice(0, 240) + '…' : line, file: f.rel });
+        }
+      });
+      if (lines.length) hits.push({ file: f.rel, hits: lines });
+    }
+    renderSearchResults(hits, scanned);
+  }
+
+  function renderSearchResults(groups, scanned) {
+    treeEl.innerHTML = '';
+    if (!groups.length) {
+      treeEl.append(el('div', { class: 'tree-row empty' }, el('span', { class: 'name', text: t('folderCompare.searchNothing') })));
+      setStatus(t('folderCompare.searchNothing'));
+      return;
+    }
+    let total = 0;
+    for (const g of groups) {
+      const head = el('div', { class: 'tree-row' },
+        el('span', { class: 'tw-cell' }), el('span', { class: 'ic', text: '📄' }),
+        el('span', { class: 'name', text: g.file }), el('span', { class: 'op', text: String(g.hits.length) }));
+      treeEl.append(head);
+      for (const h of g.hits) {
+        treeEl.append(el('div', { class: 'tree-row diff', 'data-rel': g.file },
+          el('span', { class: 'tw-cell' }), el('span', { class: 'ic', text: String(h.line) }),
+          el('span', { class: 'name', text: h.text })));
+        total++;
+      }
+    }
+    setStatus(t('folderCompare.searchDone', { n: total, files: groups.length }));
+  }
+
+  btnSearch.addEventListener('click', findInFiles);
+
+  // ---------------------------------------------------------------------
+  // 压缩包：把某一侧的压缩包解析成文件夹树（只读）
+  // ---------------------------------------------------------------------
+
+  async function openArchive(side) {
+    const picked = await api.openFiles({ filters: [{ name: 'Archives', extensions: ['zip', 'tar', 'tgz', 'gz', 'jar', 'war'] }] });
+    if (!picked || !picked[0]) return;
+    const file = picked[0];
+    const raw = await api.readRaw(file);
+    if (raw.tooBig) { setStatus(t('folderCompare.archiveSize')); return; }
+    let bytes = raw.data instanceof Uint8Array ? raw.data : Uint8Array.from(raw.data);
+    let parsed = readArchive(file, bytes);
+
+    // .tgz 是"gzip 包着 tar"：先解压一层，再按 tar 解析。
+    if (parsed.format === 'gzip') {
+      const inflated = await inflateGzip(bytes);
+      if (!inflated.ok) { setStatus(t('folderCompare.archiveBad', { reason: inflated.reason })); return; }
+      const inner = inflated.data;
+      if (detectArchiveFormat('inner.tar', inner) === 'tar') {
+        bytes = inner;
+        parsed = { ok: true, format: 'tar', entries: parseTar(inner).entries };
+      } else {
+        parsed = { ok: true, format: 'raw', entries: gzipEntries(file, raw.data)[0] ? gzipEntries(file, raw.data) : [] };
+      }
+    }
+    if (!parsed.ok) { setStatus(t('folderCompare.archiveBad', { reason: parsed.reason })); return; }
+
+    // 解压到临时目录后，用普通的文件夹比较逻辑去比：虚拟 FS 需要改动所有读盘路径，
+    // 落地到临时目录更简单，也比较快，且与既有 IPC 完全兼容。
+    const tmp = (await api.getHome()).tmp;
+    const stamp = 'diffstudio-' + Date.now();
+    const dest = joinPath(tmp, stamp + (side === 'left' ? '-L' : '-R'));
+    for (const ent of parsed.entries) {
+      const target = joinPath(dest, ent.path);
+      if (ent.dir) { await api.mkdir(target); continue; }
+      const fileBytes = await archiveEntryBytes(file, bytes, parsed, ent);
+      if (!fileBytes) continue;
+      await api.writeBinary(target, Array.from(fileBytes));
+    }
+    const dir = dest;
+    if (side === 'left') { state.left = dir; leftInput.value = dir; }
+    else { state.right = dir; rightInput.value = dir; }
+    if (state.left && state.right) compare();
+    else setStatus(t('folderCompare.archiveOpen' ) + ': ' + dir);
+  }
+
+  /** 取压缩包内单个条目的字节。ZIP 需要按方法解压，TAR 需要按偏移切片。 */
+  async function archiveEntryBytes(file, bytes, parsed, ent) {
+    if (parsed.format === 'zip') {
+      const r = await readZipEntry(bytes, ent);
+      return r.ok ? r.data : null;
+    }
+    if (parsed.format === 'tar') {
+      const start = ent.offset;
+      if (typeof start !== 'number') return null;
+      return bytes.subarray(start, start + ent.size);
+    }
+    return null;
+  }
+
+  btnArchiveLeft.addEventListener('click', () => openArchive('left'));
+  btnArchiveRight.addEventListener('click', () => openArchive('right'));
 
   /** 供应用外壳记住路径，用于"最近打开"和重启恢复。 */
   function getState() {

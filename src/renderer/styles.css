@@ -22,6 +22,7 @@
   --c-left: #ffd9d9;      /* 仅左侧 / 删除 */
   --c-right: #d4f0d4;     /* 仅右侧 / 新增 */
   --c-change: #fff4c2;    /* 已修改 */
+  --c-unimportant: #f0f0f2; /* 不重要差异：中性灰，刻意区别于"已修改"的黄色 */
   --c-conflict: #ffcccc;  /* 冲突 */
   --c-resolved: #dce8f5;  /* 已解决 */
 
@@ -333,6 +334,10 @@ body { display: flex; flex-direction: column; }
 .row.kind-left { background: var(--c-left); }
 .row.kind-right { background: var(--c-right); }
 .row.kind-change { background: var(--c-change); }
+.row.kind-unimportant { background: var(--c-unimportant); color: var(--fg-muted, #6b7280); }
+.unimportant-note { color: var(--fg-muted, #6b7280); margin-left: 6px; }
+/* 只看重要差异：把不重要行整体淡化，行数与索引保持不变。 */
+.important-only .row.kind-unimportant { opacity: 0.35; }
 .row.kind-conflict { background: var(--c-conflict); }
 .row.kind-resolved { background: var(--c-resolved); }
 .row.selected { outline: 1px solid var(--accent); outline-offset: -1px; }

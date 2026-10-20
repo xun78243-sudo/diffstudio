@@ -9,6 +9,7 @@
 import { createTextCompareSession } from './views/textCompare.js';
 import { createFolderCompareSession } from './views/folderCompare.js';
 import { createFolderSyncSession } from './views/folderSync.js';
+import { createFolderMergeSession } from './views/folderMerge.js';
 import { createMergeSession } from './views/textMerge.js';
 import { createHexCompareSession } from './views/hexCompare.js';
 import { createTableCompareSession } from './views/tableCompare.js';
@@ -44,6 +45,7 @@ const FACTORIES = {
   text: createTextCompareSession,
   folder: createFolderCompareSession,
   sync: createFolderSyncSession,
+  'folder-merge': createFolderMergeSession,
   merge: createMergeSession,
   hex: createHexCompareSession,
   table: createTableCompareSession,
@@ -55,6 +57,7 @@ const TAB_TITLE_KEYS = {
   text: 'textCompare.tabTitle',
   folder: 'folderCompare.tabTitle',
   sync: 'folderSync.tabTitle',
+  'folder-merge': 'folderMerge.tabTitle',
   merge: 'merge.tabTitle',
   hex: 'hex.tabTitle',
   table: 'table.tabTitle',
@@ -367,6 +370,7 @@ function menuModel() {
         { icon: 'text', label: t('textCompare.tabTitle'), action: () => openTab('text') },
         { icon: 'folder', label: t('folderCompare.tabTitle'), action: () => openTab('folder') },
         { icon: 'sync', label: t('folderSync.tabTitle'), action: () => openTab('sync') },
+      { icon: 'folderMerge', label: t('folderMerge.tabTitle'), action: () => openTab('folder-merge') },
         { icon: 'merge', label: t('merge.tabTitle'), action: () => openTab('merge') },
         { icon: 'hex', label: t('hex.tabTitle'), action: () => openTab('hex') },
         { icon: 'table', label: t('table.tabTitle'), action: () => openTab('table') },
